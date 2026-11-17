@@ -303,6 +303,71 @@ class TestCreateClientConfig(unittest.TestCase):
             create_client_config(juju_config, default_computer_title="computer_title"),
         )
 
+    @mock.patch.dict(
+        os.environ,
+        {
+            "JUJU_CHARM_HTTP_PROXY": "http://egress.test:3128",
+            "JUJU_CHARM_HTTPS_PROXY": "http://egress-https.test:3128",
+        },
+    )
+    def test_juju_model_proxy_used(self):
+        """
+        The model's juju-http(s)-proxy settings are used when the charm's
+        proxy options are unset.
+        """
+        expected = {
+            "http_proxy": "http://egress.test:3128",
+            "https_proxy": "http://egress-https.test:3128",
+            "computer_title": "computer_title",
+        }
+        self.assertEqual(
+            expected,
+            create_client_config({}, default_computer_title="computer_title"),
+        )
+
+    @mock.patch.dict(
+        os.environ,
+        {
+            "JUJU_CHARM_HTTP_PROXY": "http://egress.test:3128",
+            "JUJU_CHARM_HTTPS_PROXY": "http://egress-https.test:3128",
+        },
+    )
+    def test_charm_proxy_prioritized_over_juju_model_proxy(self):
+        """
+        The charm's http-proxy/https-proxy options override the model's
+        juju-http(s)-proxy settings.
+        """
+        juju_config = {
+            "http-proxy": "http://override.test:3128",
+            "https-proxy": "",
+        }
+        expected = {
+            "http_proxy": "http://override.test:3128",
+            "https_proxy": "http://egress-https.test:3128",
+            "computer_title": "computer_title",
+        }
+        self.assertEqual(
+            expected,
+            create_client_config(juju_config, default_computer_title="computer_title"),
+        )
+
+    @mock.patch.dict(
+        os.environ,
+        {"JUJU_CHARM_HTTP_PROXY": "http://egress.test:3128", "JUJU_CHARM_HTTPS_PROXY": ""},
+    )
+    def test_empty_juju_model_proxy_ignored(self):
+        """
+        Empty juju-*-proxy model settings are not added to the client config.
+        """
+        expected = {
+            "http_proxy": "http://egress.test:3128",
+            "computer_title": "computer_title",
+        }
+        self.assertEqual(
+            expected,
+            create_client_config({}, default_computer_title="computer_title"),
+        )
+
 
 class TestGetAddtionalClientConfiguration(unittest.TestCase):
     def test_empty_additional_config(self):
