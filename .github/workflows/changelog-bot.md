@@ -21,6 +21,10 @@ on:
 
 permissions:
   contents: read
+  # The agent must list open pull requests to enforce "never open a second
+  # changelog PR". Without this the token is Contents:read only and every
+  # list_pull_requests call returns 403 "Resource not accessible by integration".
+  pull-requests: read
 
 # Run on the Canonical self-hosted runner fleet. The agent and
 # threat-detection jobs need Docker/AWF and target the noble/amd64 labels;
@@ -153,7 +157,7 @@ Before making any edit, create your working branch from the default branch, not 
 
 First check for an existing open changelog pull request in this repository (label `changelog`). Exactly one should ever be open at a time.
 
-- If one is already open, do NOT open a second. Check whether its newest section already covers the commits you selected (the ` (#1234)` references). If it does, make no changes and note that the existing PR is already current. If it is missing any of your selected commits, update that PR's branch with the corrected section rather than opening a new PR.
+- If one is already open, do NOT open a second. Check whether its newest section already covers the commits you selected (the ` (#1234)` references). If it does, make no changes and note that the existing PR is already current. If it is missing any of your selected commits, post the missing entries as a comment on that PR with `add_comment` and stop; there is no handler that pushes to an existing own-repo pull request branch, so do not claim you updated it and do not open a second PR.
 - Only if no changelog PR is open, open one with the change. Use a title like `changelog update for <date>` (the `build: ` prefix is added automatically) and a body that lists the included commits, notes that only user-facing changes were selected, and includes the `Changelog entries to review` heading when anything was flagged.
 
 Never open a second changelog PR while one is open.
