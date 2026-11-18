@@ -7,6 +7,11 @@
 #     gh aw compile changelog-bot
 #
 # and commit the generated `.github/workflows/changelog-bot.lock.yml` alongside it.
+#
+# The shared plumbing (engine, checkout, runner setup, gh/node/compose installs,
+# threat detection, docs push handler) comes from the shared component imported
+# below. What stays here is only what differs for this repo: the trigger, the
+# runners, the prompt body, and the changelog PR's allowed-files.
 
 on:
   # Fire every Saturday at around 12:00 UTC.
@@ -19,67 +24,19 @@ permissions:
 
 # Run on the Canonical self-hosted runner fleet. The agent and
 # threat-detection jobs need Docker/AWF and target the noble/amd64 labels;
-# the framework and safe_outputs jobs use the slim self-hosted label.
+# the framework and safe_outputs jobs use the slim self-hosted label. These
+# cannot live in a shared component (gh-aw only allows them in a main workflow).
 runs-on: [self-hosted, noble, amd64]
 runs-on-slim: self-hosted
 
-# The default checkout is shallow (fetch-depth 1) with no tags, which makes the
-# agent see only the latest commit. Fetch full history so it can scan the
-# commit window and read the commit log. A second checkout fetches the
-# documentation repo (all branches) for the shared release-notes PR; that repo
-# is public, so the checkout needs no token (setting one here would also leak
-# it onto the primary-repo checkout in the safe-output jobs).
-checkout:
-  - fetch-depth: 0
-  - repository: canonical/landscape-documentation
-    path: ./landscape-documentation
-    fetch: ["*"]
+imports:
+  - canonical/landscape-internal-docs/.github/workflows/shared/changelog-bot-infra.md@c11434ac07328e440a933b1c5b763f6d850b594a
 
-engine:
-  id: pi
-  # Inference runs on OpenRouter via the pi engine. The vendored model id
-  # requires gh-aw v1.3.0+: earlier compilers reject the two-slash form under
-  # the model-identifier grammar (github/gh-aw#77514, fixed by #77562).
-  # OPENROUTER_API_KEY supplies the credential.
-  model: openrouter/deepseek/deepseek-v4.1-flash-1017
-  model-provider: openai
-  env:
-    OPENAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-    OPENAI_BASE_URL: https://openrouter.ai/api/v1
-
-network:
-  allowed: [defaults]
-
-# Shell access for inspecting history and formatting dates. The pi engine
-# cannot allowlist individual commands, so bash is open; the AWF sandbox,
-# network allowlist, and safe-output handlers still confine the run.
-tools:
-  bash: ["*"]
-  edit:
-
-# The agent never pushes directly; its file edits are turned into pull
-# requests. gh-aw binds the whole safe_outputs job to a single credential for
-# its git checkouts and pushes (github/gh-aw#77580). The default GITHUB_TOKEN
-# cannot write to canonical/landscape-documentation, so the whole job uses
-# LANDSCAPE_CHANGELOG_TOKEN, a fine-grained PAT with contents+pull-requests
-# read/write on both this repo and canonical/landscape-documentation; it backs
-# both the own-repo changelog PR and the release-notes push.
+# The agent never pushes directly; its file edits are turned into pull requests.
+# The shared component supplies the safe-outputs token, runners, threat
+# detection, and the docs push / add-comment handlers. What stays here is the
+# own-repo changelog PR, whose allowed-files is this repo's alone.
 safe-outputs:
-  github-token: ${{ secrets.LANDSCAPE_CHANGELOG_TOKEN }}
-  runs-on: self-hosted
-  threat-detection:
-    # Detection runs the threat-detect binary under AWF and needs Docker, so it
-    # targets the same noble amd64 runners as the agent job.
-    runs-on: [self-hosted, noble, amd64]
-    # gh-aw's threat detection is hardcoded to the Copilot CLI. Without this
-    # pin the detection job inherits the agent's engine, which the external
-    # threat-detect binary rejects, and the job fails without producing a
-    # result (github/gh-aw#78414).
-    engine: copilot
-    # Detection must also pin its own model: without it the job inherits the
-    # agent's OpenRouter model id, which the Copilot CLI cannot serve (400
-    # "model is retired or unavailable"). Use a Copilot-catalog model.
-    model: claude-haiku-5.5
   create-pull-request:
     title-prefix: "build: "
     labels: [changelog, automation]
@@ -98,97 +55,6 @@ safe-outputs:
     # diff hunk, so "insert one new dated section, never touch existing
     # sections" stays prompt-enforced.)
     allowed-files: ["CHANGELOG.md"]
-  push-to-pull-request-branch:
-    github-token: ${{ secrets.LANDSCAPE_CHANGELOG_TOKEN }}
-    target: "*"
-    target-repo: canonical/landscape-documentation
-    required-labels: [changelog, automation]
-    # Same GraphQL verified-commit problem as create-pull-request above.
-    signed-commits: false
-    # Docs PR updates may only touch release-notes pages (including index.md).
-    allowed-files: ["docs/reference/release-notes/*.md"]
-    max: 1
-  # When a run finds no user-facing commits, the agent comments its
-  # classification table on the open changelog PR instead of stopping silently.
-  add-comment:
-    github-token: ${{ secrets.LANDSCAPE_CHANGELOG_TOKEN }}
-    max: 1
-
-# The self-hosted runner image ships a Node too old for gh-aw's runtime
-# scripts ("Cannot find module 'node:fs'" in the activation job). Install a
-# modern Node before activation runs.
-jobs:
-  activation:
-    pre-steps:
-      - name: Setup modern Node for gh-aw runtime
-        uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-  # gh-aw's install_copilot_cli.sh uses --prefer-toolcache, which does not
-  # land the binary on PATH on this self-hosted runner image, so the
-  # threat-detection step exits 127. Install @github/copilot globally with
-  # npm in a detection pre-step so the binary resolves.
-  detection:
-    pre-steps:
-      - name: Install modern gh CLI
-        run: |
-          GH_VERSION="2.83.1"
-          GH_SHA256="1c5252d4ce3db07b51c01ff0b909583da6364ff3fdc06d0c2e75e62dc0380a34"
-          tmp="$(mktemp -d)"
-          curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o "$tmp/gh.tgz"
-          echo "${GH_SHA256}  $tmp/gh.tgz" | sha256sum -c -
-          tar -xzf "$tmp/gh.tgz" -C "$tmp"
-          install -m 0755 "$tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh
-          rm -rf "$tmp"
-          gh version
-        env:
-          GH_TOKEN: ${{ github.token }}
-      - name: Install GitHub Copilot CLI
-        run: |
-          export NPM_CONFIG_PREFIX="$HOME/.npm-global"
-          mkdir -p "$NPM_CONFIG_PREFIX"
-          npm install -g @github/copilot@1.0.103
-          echo "$NPM_CONFIG_PREFIX/bin" >> "$GITHUB_PATH"
-          "$NPM_CONFIG_PREFIX/bin/copilot" --version
-
-# The self-hosted runner image lacks the Docker Compose plugin, so the AWF
-# sandbox's "docker compose up -d" fails with "unknown shorthand flag: 'd' in
-# -d" and the agent job exits 125. Install the plugin before the agent job's
-# setup scripts.
-steps:
-  - name: Install Docker Compose plugin
-    run: |
-      if docker compose version >/dev/null 2>&1; then
-        echo "Docker Compose plugin already present, skipping install."
-        docker compose version
-        exit 0
-      fi
-      COMPOSE_VERSION="v5.5.0"
-      COMPOSE_SHA256="c57ab918abd5b05ca7e7d0f275875dd1330a695074f309dc9eab1b49efafcd4b"
-      mkdir -p ~/.docker/cli-plugins
-      curl -fsSL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64" \
-        -o ~/.docker/cli-plugins/docker-compose
-      echo "${COMPOSE_SHA256}  $HOME/.docker/cli-plugins/docker-compose" | sha256sum -c -
-      chmod +x ~/.docker/cli-plugins/docker-compose
-      docker compose version
-
-# The runner image also ships a gh too old for "gh attestation verify",
-# which the agent job's AWF install requires. Install a checksum-verified
-# modern gh CLI before the agent job's setup scripts.
-pre-steps:
-  - name: Install modern gh CLI
-    run: |
-      GH_VERSION="2.83.1"
-      GH_SHA256="1c5252d4ce3db07b51c01ff0b909583da6364ff3fdc06d0c2e75e62dc0380a34"
-      tmp="$(mktemp -d)"
-      curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o "$tmp/gh.tgz"
-      echo "${GH_SHA256}  $tmp/gh.tgz" | sha256sum -c -
-      tar -xzf "$tmp/gh.tgz" -C "$tmp"
-      install -m 0755 "$tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh
-      rm -rf "$tmp"
-      gh version
-    env:
-      GH_TOKEN: ${{ github.token }}
 ---
 
 # Weekly changelog update
