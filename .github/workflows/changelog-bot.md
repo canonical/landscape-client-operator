@@ -28,8 +28,9 @@ permissions:
 
 # Run on the Canonical self-hosted runner fleet. The agent and
 # threat-detection jobs need Docker/AWF and target the noble/amd64 labels;
-# the framework and safe_outputs jobs use the slim self-hosted label. These
-# cannot live in a shared component (gh-aw only allows them in a main workflow).
+# the activation, conclusion and safe_outputs jobs use the slim self-hosted
+# label. These cannot live in a shared component (gh-aw only allows them in a
+# main workflow).
 runs-on: [self-hosted, noble, amd64]
 runs-on-slim: self-hosted
 
@@ -42,6 +43,14 @@ imports:
 # own-repo changelog PR, whose allowed-files is this repo's alone.
 safe-outputs:
   create-pull-request:
+    # The own-repo changelog PR is created with the same PAT as the rest of the
+    # safe_outputs job, not the default GITHUB_TOKEN: gh-aw binds that job to a
+    # single credential (github/gh-aw#77580) and its checkout/push use
+    # LANDSCAPE_CHANGELOG_TOKEN. Naming it here keeps the handler from falling
+    # back to the job-wide GITHUB_TOKEN env if the component ever stops setting
+    # the blanket token. A GITHUB_TOKEN-authored PR would also not trigger this
+    # repo's lint/cla checks.
+    github-token: ${{ secrets.LANDSCAPE_CHANGELOG_TOKEN }}
     title-prefix: "build: "
     labels: [changelog, automation]
     team-reviewers: [canonical/landscape]
