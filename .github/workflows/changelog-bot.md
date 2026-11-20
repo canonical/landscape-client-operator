@@ -61,13 +61,14 @@ safe-outputs:
     # bot token, and pushSignedCommits then refuses to publish the branch.
     signed-commits: false
     max: 1
-    preserve-branch-name: true
     recreate-ref: true
     # The bot only ever edits CHANGELOG.md in this repo; the handler rejects
     # any other path outright. (gh-aw allowed-files filters by path only, not
     # diff hunk, so "insert one new dated section, never touch existing
     # sections" stays prompt-enforced.)
     allowed-files: ["CHANGELOG.md"]
+  add-comment:
+    target: "*"
 ---
 
 # Weekly changelog update
