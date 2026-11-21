@@ -173,6 +173,21 @@ def get_additional_client_configuration(
         raise ClientCharmError(f"Malformed additional-client-configuration: {repr(raw)}") from e
 
 
+def get_juju_proxy_vars() -> Dict[str, str]:
+    """
+    Return the model's juju-http(s)-proxy settings which are exposed by
+    Juju as JUJU_CHARM_HTTP(S)_PROXY and keyed by their client config names.
+
+    Unset or empty values are omitted.
+    """
+    proxy_vars = {}
+    for var in ("http_proxy", "https_proxy"):
+        value = os.environ.get(f"JUJU_CHARM_{var.upper()}", "")
+        if value:
+            proxy_vars[var] = value
+    return proxy_vars
+
+
 def create_client_config(
     juju_config: Mapping[str, Any],
     default_computer_title: str,
@@ -185,12 +200,19 @@ def create_client_config(
 
     Juju config values with multiple words are hyphen-separated, but client
     values are underscore-separated.
+
+    If the charm's http-proxy/https-proxy options are unset, the model's
+    juju-http-proxy/juju-https-proxy settings are used instead.
     """
     client_config = {
         key.replace("-", "_"): value
         for key, value in juju_config.items()
         if key not in CHARM_ONLY_CONFIGS
     }
+
+    for key, value in get_juju_proxy_vars().items():
+        if not client_config.get(key):
+            client_config[key] = value
 
     additional_configuration = get_additional_client_configuration(juju_config)
     client_config.update(additional_configuration)
