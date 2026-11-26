@@ -2,6 +2,7 @@
 #
 # Learn more about testing at: https://juju.is/docs/sdk/testing
 import base64
+import configparser
 import os
 import unittest
 from unittest import mock
@@ -18,6 +19,7 @@ from charm import (
     get_additional_client_configuration,
     get_modified_env_vars,
     LandscapeClientCharm,
+    merge_client_config,
 )
 
 
@@ -335,7 +337,7 @@ class TestCreateClientConfig(unittest.TestCase):
     def test_charm_proxy_prioritized_over_juju_model_proxy(self):
         """
         The charm's http-proxy/https-proxy options override the model's
-        juju-http(s)-proxy settings.
+        juju-http(s)-proxy settings, including an explicitly empty value.
         """
         juju_config = {
             "http-proxy": "http://override.test:3128",
@@ -343,12 +345,27 @@ class TestCreateClientConfig(unittest.TestCase):
         }
         expected = {
             "http_proxy": "http://override.test:3128",
-            "https_proxy": "http://egress-https.test:3128",
+            "https_proxy": "",
             "computer_title": "computer_title",
         }
         self.assertEqual(
             expected,
             create_client_config(juju_config, default_computer_title="computer_title"),
+        )
+
+    @mock.patch.dict(
+        os.environ,
+        {"JUJU_CHARM_HTTP_PROXY": "http://egress.test:3128"},
+    )
+    def test_unset_charm_proxy_falls_back_to_juju_model_proxy(self):
+        """A charm proxy option that is None falls back to the model's setting."""
+        expected = {
+            "http_proxy": "http://egress.test:3128",
+            "computer_title": "computer_title",
+        }
+        self.assertEqual(
+            expected,
+            create_client_config({"http-proxy": None}, default_computer_title="computer_title"),
         )
 
     @mock.patch.dict(
@@ -420,3 +437,34 @@ class TestGetAddtionalClientConfiguration(unittest.TestCase):
         juju_config = {"additional-client-configuration": "[client]\nsomevalue = somekey"}
         expected = {"somevalue": "somekey"}
         self.assertEqual(expected, get_additional_client_configuration(juju_config))
+
+
+class TestMergeClientConfig(unittest.TestCase):
+    def merge(self, initial_content, client_config):
+        with mock.patch("builtins.open", mock.mock_open(read_data=initial_content)) as mocked:
+            merge_client_config("client.conf", client_config)
+        written = "".join(call.args[0] for call in mocked().write.mock_calls)
+        config = configparser.ConfigParser()
+        config.read_string(written)
+        return dict(config["client"])
+
+    def test_explicit_empty_proxy_clears_stale_value(self):
+        """An explicitly empty proxy option clears a value from an earlier config."""
+        merged = self.merge(
+            "[client]\nhttp_proxy = http://proxy.test:3128\n"
+            "url = https://landscape.test/message-system\n",
+            {"http_proxy": "", "https_proxy": "", "url": None},
+        )
+        self.assertEqual("", merged["http_proxy"])
+        self.assertEqual("", merged["https_proxy"])
+        self.assertEqual("https://landscape.test/message-system", merged["url"])
+
+    def test_unset_option_does_not_remove_existing_key(self):
+        """Unset (None) options leave Landscape client's existing defaults alone."""
+        merged = self.merge(
+            "[client]\nlog_level = debug\nurl = https://landscape.test/message-system\n",
+            {"log_level": None, "computer_title": "my-host"},
+        )
+        self.assertEqual("debug", merged["log_level"])
+        self.assertEqual("https://landscape.test/message-system", merged["url"])
+        self.assertEqual("my-host", merged["computer_title"])
