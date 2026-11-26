@@ -132,8 +132,9 @@ def merge_client_config(conf_file: str, client_config: Mapping[str, Any]):
     overwriting existing values.
 
     Unset options (None) are left alone so the Landscape client defaults survive.
-    Explicitly empty options are written so they can clear a stale value, for
-    example an http_proxy left behind by a previous configuration.
+    Explicitly falsey options (empty string, 0, False) are written so they can
+    clear a stale value, for example an http_proxy left behind by an earlier
+    configuration.
     """
     config = configparser.ConfigParser()
     config.read(conf_file)

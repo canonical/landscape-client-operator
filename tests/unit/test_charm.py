@@ -468,3 +468,12 @@ class TestMergeClientConfig(unittest.TestCase):
         self.assertEqual("debug", merged["log_level"])
         self.assertEqual("https://landscape.test/message-system", merged["url"])
         self.assertEqual("my-host", merged["computer_title"])
+
+    def test_explicit_falsey_values_are_written(self):
+        """Explicitly configured 0 and False are written, like empty strings."""
+        merged = self.merge(
+            "[client]\nstagger_launch = 0.5\n",
+            {"stagger_launch": 0, "disable_unattended_upgrades": False},
+        )
+        self.assertEqual("0", merged["stagger_launch"])
+        self.assertEqual("False", merged["disable_unattended_upgrades"])

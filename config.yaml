@@ -76,13 +76,15 @@ options:
   http-proxy:
     description: |
       The URL of the HTTP proxy, if one is needed. If unset, the model's
-      juju-http-proxy setting is used.
+      juju-http-proxy setting is used. Set to an empty string to disable the
+      proxy even when the model has one configured.
     type: string
     default:
   https-proxy:
     description: |
       The URL of the HTTPS proxy, if one is needed. If unset, the model's
-      juju-https-proxy setting is used.
+      juju-https-proxy setting is used. Set to an empty string to disable the
+      proxy even when the model has one configured.
     type: string
     default:
   tags:
