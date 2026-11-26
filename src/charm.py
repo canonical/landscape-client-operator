@@ -130,11 +130,16 @@ def merge_client_config(conf_file: str, client_config: Mapping[str, Any]):
     """
     Read the contents of the [client] section in `conf_file` and merge `client_config`,
     overwriting existing values.
+
+    Unset options (None) are left alone so the Landscape client defaults survive.
+    Explicitly falsey options (empty string, 0, False) are written so they can
+    clear a stale value, for example an http_proxy left behind by an earlier
+    configuration.
     """
     config = configparser.ConfigParser()
     config.read(conf_file)
 
-    config["client"].update({k: str(v) for k, v in client_config.items() if v})
+    config["client"].update({k: str(v) for k, v in client_config.items() if v is not None})
 
     with open(conf_file, "w") as configfile:
         config.write(configfile)
@@ -202,7 +207,8 @@ def create_client_config(
     values are underscore-separated.
 
     If the charm's http-proxy/https-proxy options are unset, the model's
-    juju-http-proxy/juju-https-proxy settings are used instead.
+    juju-http-proxy/juju-https-proxy settings are used instead. An explicitly
+    empty charm option disables the proxy instead of falling back to the model.
     """
     client_config = {
         key.replace("-", "_"): value
@@ -211,7 +217,7 @@ def create_client_config(
     }
 
     for key, value in get_juju_proxy_vars().items():
-        if not client_config.get(key):
+        if client_config.get(key) is None:
             client_config[key] = value
 
     additional_configuration = get_additional_client_configuration(juju_config)
